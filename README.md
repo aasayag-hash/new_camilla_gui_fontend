@@ -161,12 +161,37 @@
 
 ### En Raspberry Pi OS / Debian / Ubuntu
 
-```bash
-# 1. Clonar el repositorio
-git clone https://github.com/TU_USUARIO/camilladsp-web-gui.git
-cd camilladsp-web-gui
+#### Opción A — Desde GitHub
 
-# 2. Ejecutar el instalador
+```bash
+git clone https://github.com/aasayag-hash/new_camilla_gui_fontend.git
+cd new_camilla_gui_fontend
+sudo bash install.sh
+```
+
+> **Nota:** GitHub no acepta contraseñas por HTTPS desde agosto 2021.  
+> Usar **SSH** (`git@github.com:aasayag-hash/new_camilla_gui_fontend.git`) o un **Personal Access Token** como contraseña.  
+> Ver [Cómo subir el proyecto a GitHub](#cómo-subir-el-proyecto-a-github) más abajo.
+
+#### Opción B — Copiar los archivos directamente (sin GitHub)
+
+Si tienes los archivos en un PC con Windows y el servidor es una Raspberry Pi u otro Linux en tu red:
+
+```bash
+# Desde Windows (PowerShell o cmd), copiar via SCP:
+scp -r "C:\Users\lenovo\Downloads\fir python\new_camilla_gui_fontend" pi@192.168.1.45:/home/pi/new_camilla_gui_fontend
+
+# Luego en el servidor Linux:
+cd /home/pi/new_camilla_gui_fontend
+sudo bash install.sh
+```
+
+O copiar con un pendrive USB:
+
+```bash
+# En Linux, montar el pendrive y copiar:
+cp -r /media/usb/new_camilla_gui_fontend /home/pi/
+cd /home/pi/new_camilla_gui_fontend
 sudo bash install.sh
 ```
 
@@ -356,7 +381,7 @@ deactivate
 # El backend lo sirve automáticamente como archivos estáticos
 
 # Opción A: clonar directamente en gui/
-git clone https://github.com/TU_USUARIO/camilladsp-web-gui.git /opt/camillagui/backend/gui
+git clone https://github.com/aasayag-hash/new_camilla_gui_fontend.git /opt/camillagui/backend/gui
 
 # Opción B: copiar manualmente desde un directorio local
 cp -r /ruta/al/frontend /opt/camillagui/backend/gui
@@ -480,7 +505,7 @@ Abrir **dos terminales** en el servidor:
 
 **Terminal 1 — CamillaDSP:**
 ```bash
-camilladsp -p 1234 -a 0.0.0.0 /etc/camilladsp/configs/default.yml
+camilladsp -a 0.0.0.0 -p 1234 -w /etc/camilladsp/configs/default.yml
 ```
 
 **Terminal 2 — Backend + Frontend:**
@@ -508,7 +533,7 @@ Una vez verificado que todo funciona en modo manual, configurar el inicio autom�
 ### Crear servicio para CamillaDSP
 
 ```bash
-sudo tee /etc/systemd/system/camilladsp.service << 'EOF'
+sudo tee /etc/systemd/system/camilladsp-engine.service << 'EOF'
 [Unit]
 Description=CamillaDSP Audio Processor
 After=sound.target
@@ -518,7 +543,7 @@ Wants=sound.target
 Type=simple
 User=pi
 Group=audio
-ExecStart=/usr/local/bin/camilladsp -p 1234 -a 0.0.0.0 /etc/camilladsp/configs/default.yml
+ExecStart=/usr/local/bin/camilladsp -a 0.0.0.0 -p 1234 -w /etc/camilladsp/configs/default.yml
 Restart=on-failure
 RestartSec=5
 StandardOutput=journal
@@ -529,7 +554,8 @@ WantedBy=multi-user.target
 EOF
 ```
 
-> Reemplazar `User=pi` por tu usuario real (usar `whoami` para verlo).
+> Reemplazar `User=pi` por tu usuario real (usar `whoami` para verlo).  
+> El flag `-w` hace que CamillaDSP espere la conexión WebSocket del backend antes de procesar audio.
 
 ### Crear servicio para el backend
 
@@ -540,7 +566,7 @@ CURRENT_USER=$(whoami)
 sudo tee /etc/systemd/system/camillagui.service << EOF
 [Unit]
 Description=CamillaGUI Web Backend
-After=network-online.target camilladsp.service
+After=network-online.target camilladsp-engine.service
 Wants=network-online.target
 
 [Service]
@@ -566,15 +592,15 @@ EOF
 sudo systemctl daemon-reload
 
 # Habilitar inicio automático al arrancar
-sudo systemctl enable camilladsp.service
+sudo systemctl enable camilladsp-engine.service
 sudo systemctl enable camillagui.service
 
 # Iniciar ahora
-sudo systemctl start camilladsp.service
+sudo systemctl start camilladsp-engine-engine.service
 sudo systemctl start camillagui.service
 
 # Verificar estado
-sudo systemctl status camilladsp
+sudo systemctl status camilladsp-engine-engine
 sudo systemctl status camillagui
 ```
 
@@ -582,24 +608,27 @@ sudo systemctl status camillagui
 
 ```bash
 # Iniciar ambos servicios
-sudo systemctl start camilladsp camillagui
+sudo systemctl start camilladsp-engine-engine camillagui
 
 # Detener ambos servicios
-sudo systemctl stop camillagui camilladsp
+sudo systemctl stop camillagui camilladsp-engine
 
 # Reiniciar solo el backend (después de cambiar configuración)
 sudo systemctl restart camillagui
 
+# Reiniciar el motor DSP (después de cambiar hardware de audio)
+sudo systemctl restart camilladsp-engine
+
 # Ver logs en tiempo real
+sudo journalctl -u camilladsp-engine -f
 sudo journalctl -u camillagui -f
-sudo journalctl -u camilladsp -f
 
 # Ver los últimos 50 mensajes de log
+sudo journalctl -u camilladsp-engine -n 50
 sudo journalctl -u camillagui -n 50
-sudo journalctl -u camilladsp -n 50
 
 # Deshabilitar inicio automático
-sudo systemctl disable camilladsp camillagui
+sudo systemctl disable camilladsp-engine camillagui
 ```
 
 ---
@@ -943,9 +972,9 @@ sudo ufw allow 5005/tcp
 
 ```bash
 # 1. Verificar que CamillaDSP está corriendo
-sudo systemctl status camilladsp
+sudo systemctl status camilladsp-engine
 # Si no está corriendo:
-sudo systemctl start camilladsp
+sudo systemctl start camilladsp-engine
 sudo journalctl -u camilladsp -n 30
 
 # 2. Verificar conexión backend ↔ CamillaDSP
@@ -953,7 +982,7 @@ curl http://localhost:5005/api/status
 # Si responde {} o con error de conexión, CamillaDSP no está accesible
 
 # 3. Verificar que CamillaDSP puede abrir el dispositivo de audio
-sudo journalctl -u camilladsp -f
+sudo journalctl -u camilladsp-engine -f
 # Buscar errores como:
 # "Failed to open device hw:0,0"
 # "Device busy"
@@ -971,7 +1000,8 @@ aplay -D hw:0,0 /usr/share/sounds/alsa/Front_Left.wav
 
 | Causa | Solución |
 |-------|---------|
-| CamillaDSP no está corriendo | `sudo systemctl start camilladsp` |
+| CamillaDSP no está corriendo | `sudo systemctl start camilladsp-engine` |
+
 | Dispositivo ALSA incorrecto en default.yml | Corregir `device:` con el resultado de `aplay -l` |
 | Dispositivo en uso por otro proceso | `fuser /dev/snd/*` para ver qué proceso lo usa |
 | Usuario sin permisos de audio | `sudo usermod -aG audio $USER` y reiniciar sesión |
@@ -1121,7 +1151,8 @@ sudo journalctl -b -p err
 
 ```bash
 # Estado general del sistema
-sudo systemctl status camilladsp camillagui
+sudo systemctl status camilladsp-engine
+sudo systemctl status camillagui
 
 # Logs en tiempo real (ambos servicios)
 sudo journalctl -u camilladsp -u camillagui -f
@@ -1143,6 +1174,75 @@ sudo ufw status
 top -b -n1 | head -20
 df -h
 free -h
+```
+
+---
+
+## Cómo subir el proyecto a GitHub
+
+El repositorio oficial es: **https://github.com/aasayag-hash/new_camilla_gui_fontend**
+
+### Actualizar el repositorio existente (push de cambios)
+
+```bash
+cd "C:\Users\lenovo\Downloads\fir python\new_camilla_gui_fontend"
+
+# Si es la primera vez, configurar el remote
+git remote add origin https://github.com/aasayag-hash/new_camilla_gui_fontend.git
+# Si ya existe el remote, omitir el comando anterior
+
+git add .
+git commit -m "Update: descripción del cambio"
+git push origin main
+# Username: aasayag-hash
+# Password: PEGAR_TOKEN_PERSONAL (no la contraseña de GitHub)
+```
+
+### Cómo obtener el Personal Access Token (PAT)
+
+GitHub no acepta contraseñas por HTTPS desde agosto 2021. Necesitas un token:
+
+1. Ir a **github.com** → click en tu avatar → **Settings**
+2. En el menú izquierdo, ir al final: **Developer settings**
+3. **Personal access tokens** → **Tokens (classic)**
+4. Click en **Generate new token (classic)**
+5. Escribir un nombre (ej: "mi-pc"), marcar el scope **repo**, click **Generate token**
+6. **Copiar el token inmediatamente** — solo se muestra una vez
+
+### Alternativa: usar SSH (sin token)
+
+```bash
+# Generar clave SSH (si no tienes una)
+ssh-keygen -t ed25519 -C "tu@email.com"
+
+# Copiar la clave pública y agregarla en GitHub:
+# github.com → Settings → SSH and GPG keys → New SSH key
+cat ~/.ssh/id_ed25519.pub
+
+# Verificar conexión
+ssh -T git@github.com
+# Respuesta: "Hi aasayag-hash! You've successfully authenticated..."
+
+# Configurar remote SSH
+git remote set-url origin git@github.com:aasayag-hash/new_camilla_gui_fontend.git
+git push origin main
+```
+
+### Clonar en el servidor Linux
+
+```bash
+# Con HTTPS (pedirá usuario y token como contraseña)
+git clone https://github.com/aasayag-hash/new_camilla_gui_fontend.git
+
+# Con HTTPS embebiendo el token (sin preguntar)
+git clone https://aasayag-hash:TOKEN@github.com/aasayag-hash/new_camilla_gui_fontend.git
+
+# Con SSH (sin contraseña, si configuraste la clave)
+git clone git@github.com:aasayag-hash/new_camilla_gui_fontend.git
+
+# Instalar
+cd new_camilla_gui_fontend
+sudo bash install.sh
 ```
 
 ---

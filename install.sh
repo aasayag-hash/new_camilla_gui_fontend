@@ -22,6 +22,7 @@ BACKEND_DIR="$INSTALL_DIR/backend"
 FRONTEND_DIR="$INSTALL_DIR/frontend"
 CAMILLADSP_BIN="/usr/local/bin/camilladsp"
 BACKEND_REPO="https://github.com/HEnquist/camillagui-backend.git"
+FRONTEND_REPO="https://github.com/aasayag-hash/new_camilla_gui_fontend.git"
 CAMILLADSP_REPO="https://github.com/HEnquist/camilladsp"
 SERVICE_USER="${SUDO_USER:-$(whoami)}"
 PYTHON_MIN="3.8"
@@ -201,20 +202,37 @@ success "Dependencias Python instaladas"
 # ══════════════════════════════════════════════════════════════════════════════
 step "4/6 — Instalando frontend web"
 # ══════════════════════════════════════════════════════════════════════════════
-# Determinar directorio GUI del backend
 GUI_DEST="$BACKEND_DIR/gui"
 mkdir -p "$GUI_DEST"
 
-# Copiar archivos del frontend (directorio del script)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-info "Copiando frontend desde $SCRIPT_DIR a $GUI_DEST..."
 
-rsync -a --exclude='.git' --exclude='.claude' --exclude='install.sh' \
-    "$SCRIPT_DIR/" "$GUI_DEST/" 2>/dev/null \
-    || cp -r "$SCRIPT_DIR"/* "$GUI_DEST/" 2>/dev/null \
-    || true
-
-success "Frontend copiado a $GUI_DEST"
+# Detectar si el script se ejecuta desde dentro del repositorio clonado
+# (existe index.html en el mismo directorio del script)
+if [[ -f "$SCRIPT_DIR/index.html" ]]; then
+    info "Copiando frontend desde $SCRIPT_DIR a $GUI_DEST..."
+    if command -v rsync &>/dev/null; then
+        rsync -a --exclude='.git' --exclude='.claude' --exclude='install.sh' \
+            "$SCRIPT_DIR/" "$GUI_DEST/"
+    else
+        cp -r "$SCRIPT_DIR"/index.html "$GUI_DEST/"
+        cp -r "$SCRIPT_DIR"/js         "$GUI_DEST/"
+        cp -r "$SCRIPT_DIR"/style      "$GUI_DEST/"
+        [[ -d "$SCRIPT_DIR/assets" ]] && cp -r "$SCRIPT_DIR"/assets "$GUI_DEST/"
+    fi
+    success "Frontend copiado a $GUI_DEST"
+else
+    # El script se ejecutó desde un directorio diferente — clonar desde GitHub
+    info "Clonando frontend desde $FRONTEND_REPO..."
+    if [[ -d "$GUI_DEST/.git" ]]; then
+        info "Frontend ya existe, actualizando..."
+        cd "$GUI_DEST"
+        git pull --ff-only 2>&1 | tail -3 || true
+    else
+        git clone --depth=1 "$FRONTEND_REPO" "$GUI_DEST"
+    fi
+    success "Frontend instalado en $GUI_DEST"
+fi
 
 # ══════════════════════════════════════════════════════════════════════════════
 step "5/6 — Configurando backend"
@@ -296,8 +314,8 @@ step "6/6 — Servicio systemd"
 # ══════════════════════════════════════════════════════════════════════════════
 if [[ "${CREATE_SERVICE^^}" != "N" ]] && command -v systemctl &>/dev/null; then
 
-    # Servicio camilladsp
-    cat > /etc/systemd/system/camilladsp.service << EOF
+    # Servicio camilladsp-engine
+    cat > /etc/systemd/system/camilladsp-engine.service << EOF
 [Unit]
 Description=CamillaDSP Audio Processor
 After=sound.target
@@ -305,7 +323,7 @@ After=sound.target
 [Service]
 Type=simple
 User=$SERVICE_USER
-ExecStart=$CAMILLADSP_BIN -p 1234 -a 0.0.0.0 $DEFAULT_CFG
+ExecStart=$CAMILLADSP_BIN -a 0.0.0.0 -p 1234 -w $DEFAULT_CFG
 Restart=on-failure
 RestartSec=5
 
@@ -317,7 +335,7 @@ EOF
     cat > /etc/systemd/system/camillagui.service << EOF
 [Unit]
 Description=CamillaGUI Web Backend
-After=network.target camilladsp.service
+After=network.target camilladsp-engine.service
 
 [Service]
 Type=simple
@@ -334,9 +352,9 @@ EOF
 
     systemctl daemon-reload
     systemctl enable camillagui.service || true
-    systemctl enable camilladsp.service || true
+    systemctl enable camilladsp-engine.service || true
     success "Servicios systemd creados y habilitados"
-    info "Para iniciar ahora: sudo systemctl start camilladsp camillagui"
+    info "Para iniciar ahora: sudo systemctl start camilladsp-engine camillagui"
 else
     info "Servicio systemd omitido."
     info "Para iniciar manualmente:"
@@ -359,8 +377,9 @@ echo ""
 # Resumen
 if command -v systemctl &>/dev/null && systemctl is-enabled camillagui.service &>/dev/null; then
     echo -e "Comandos útiles:"
-    echo "  sudo systemctl start   camilladsp camillagui"
-    echo "  sudo systemctl stop    camilladsp camillagui"
-    echo "  sudo systemctl status  camillagui"
+    echo "  sudo systemctl start   camilladsp-engine camillagui"
+    echo "  sudo systemctl stop    camillagui camilladsp-engine"
+    echo "  sudo systemctl status  camilladsp-engine camillagui"
+    echo "  sudo journalctl -u camilladsp-engine -f"
     echo "  sudo journalctl -u camillagui -f"
 fi
