@@ -272,17 +272,26 @@ step "3/6 — Instalando camillagui-backend"
 mkdir -p "$INSTALL_DIR"
 
 if [[ -d "$BACKEND_DIR/.git" ]]; then
-    info "Backend ya existe, actualizando..."
-    cd "$BACKEND_DIR"
-    git fetch --tags 2>&1 | tail -3 || true
-    if [[ -n "$BACKEND_TAG" ]]; then
-        info "Cambiando a versión $BACKEND_TAG..."
-        git checkout "$BACKEND_TAG" 2>&1 | tail -3 \
-            || git pull --ff-only 2>&1 | tail -3 || true
+    warn "El directorio del backend ya existe: $BACKEND_DIR"
+    read -rp "¿Desea eliminarlo y hacer una instalación limpia? [s/N]: " CLEAN_INSTALL
+    if [[ "${CLEAN_INSTALL^^}" == "S" ]]; then
+        info "Eliminando instalación anterior..."
+        rm -rf "$BACKEND_DIR"
     else
-        git pull --ff-only 2>&1 | tail -3 || true
+        info "Actualizando instalación existente..."
+        cd "$BACKEND_DIR"
+        git fetch --tags 2>&1 | tail -3 || true
+        if [[ -n "$BACKEND_TAG" ]]; then
+            info "Cambiando a versión $BACKEND_TAG..."
+            git checkout "$BACKEND_TAG" 2>&1 | tail -3 \
+                || git pull --ff-only 2>&1 | tail -3 || true
+        else
+            git pull --ff-only 2>&1 | tail -3 || true
+        fi
     fi
-else
+fi
+
+if [[ ! -d "$BACKEND_DIR/.git" ]]; then
     if [[ -n "$BACKEND_TAG" ]]; then
         info "Clonando camillagui-backend $BACKEND_TAG..."
         git clone --depth=1 --branch "$BACKEND_TAG" "$BACKEND_REPO" "$BACKEND_DIR"
