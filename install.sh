@@ -467,12 +467,20 @@ if [[ ! -f "$ACTIVE_CFG" ]]; then
     success "Configuración activa creada: $ACTIVE_CFG"
 fi
 
-# ══════════════════════════════════════════════════════════════════════════════
+STATEFILE="$INSTALL_DIR/camilladsp_state.yml"
+cat > "$STATEFILE" << EOF
+---
+config_file: $ACTIVE_CFG
+EOF
+success "Statefile creado: $STATEFILE"
+
+# ═══════════════════════════════════════════════════════════════════════════════
 step "6/6 — Servicio systemd"
 # ══════════════════════════════════════════════════════════════════════════════
 if [[ "${CREATE_SERVICE^^}" != "N" ]] && command -v systemctl &>/dev/null; then
 
     # Servicio camilladsp-engine
+    STATEFILE="$INSTALL_DIR/camilladsp_state.yml"
     cat > /etc/systemd/system/camilladsp-engine.service << EOF
 [Unit]
 Description=CamillaDSP Audio Processor
@@ -481,7 +489,7 @@ After=sound.target
 [Service]
 Type=simple
 User=$SERVICE_USER
-ExecStart=$CAMILLADSP_BIN -c $DEFAULT_CFG -p 1234 -a 0.0.0.0
+ExecStart=$CAMILLADSP_BIN -p 1234 -a 0.0.0.0 -s $STATEFILE
 Restart=on-failure
 RestartSec=5
 
