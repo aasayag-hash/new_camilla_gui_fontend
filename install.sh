@@ -243,6 +243,7 @@ if [[ "${INSTALL_CDSP^^}" != "N" ]]; then
     if [[ -n "$CDSP_URL" ]]; then
         info "Descargando CamillaDSP v${CDSP_VERSION} para ${ARCH_NAME}..."
         TMP_DIR=$(mktemp -d)
+        OLD_DIR=$(pwd)
         cd "$TMP_DIR"
         if _fetch "$CDSP_URL" -o camilladsp.tar.gz; then
             tar xzf camilladsp.tar.gz
@@ -257,6 +258,7 @@ if [[ "${INSTALL_CDSP^^}" != "N" ]]; then
         else
             warn "No se pudo descargar el binario precompilado."
         fi
+        cd "$OLD_DIR"
         rm -rf "$TMP_DIR"
     else
         warn "No hay binario precompilado para $ARCH_NAME."
