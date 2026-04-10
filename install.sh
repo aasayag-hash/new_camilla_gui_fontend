@@ -321,6 +321,26 @@ EOF
     chown -R "${SERVICE_USER}:${SERVICE_USER}" "$CONFIG_DIR"
     chown -R "${SERVICE_USER}:${SERVICE_USER}" "$INSTALL_DIR/backend/build" 2>/dev/null || true
     chmod 600 "$CONFIG_DIR/statefile.yml"
+    
+    # Iniciar servicios
+    info "Iniciando servicios..."
+    systemctl start camilladsp-engine.service camillagui.service 2>/dev/null || true
+    
+    sleep 2
+    ENGINE_STATUS=$(systemctl is-active camilladsp-engine.service 2>/dev/null || echo "inactive")
+    GUI_STATUS=$(systemctl is-active camillagui.service 2>/dev/null || echo "inactive")
+    
+    if [[ "$ENGINE_STATUS" == "active" ]]; then
+        log "CamillaDSP Engine iniciado"
+    else
+        warn "Engine no iniciado (verifica la configuración de audio)"
+    fi
+    
+    if [[ "$GUI_STATUS" == "active" ]]; then
+        log "CamillaGUI Backend iniciado"
+    else
+        warn "Backend no iniciado"
+    fi
 fi
 
 # ═══════════════════════════════════════════════════════════════════════════════
