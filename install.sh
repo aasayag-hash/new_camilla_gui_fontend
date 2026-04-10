@@ -19,22 +19,147 @@ error()   { echo -e "${RED}[ERR]${NC}  $*" >&2; }
 step()    { echo -e "\n${BOLD}${BLUE}══ $* ${NC}"; }
 
 # ── Config por defecto ────────────────────────────────────────────────────────
-INSTALL_DIR="/opt/camillagui"
-BACKEND_DIR="$INSTALL_DIR/backend"
-FRONTEND_DIR="$INSTALL_DIR/frontend"
-CAMILLADSP_BIN="/usr/local/bin/camilladsp"
+INSTALL_DIR="/opt/camilladsp"
+BIN_DIR="/usr/local/bin"
+CONFIG_DIR="/etc/camilladsp"
+SYSTEMD_DIR="/etc/systemd/system"
+CAMILLADSP_BIN="${BIN_DIR}/camilladsp"
 BACKEND_REPO="https://github.com/HEnquist/camillagui-backend.git"
 FRONTEND_REPO="https://github.com/aasayag-hash/new_camilla_gui_fontend.git"
 CAMILLADSP_REPO="https://github.com/HEnquist/camilladsp"
-SERVICE_USER="${SUDO_USER:-$(whoami)}"
-PYTHON_MIN="3.8"
+
+# Determinar el usuario real que invocó sudo
+SERVICE_USER="${SUDO_USER:-}"
+if [[ -z "$SERVICE_USER" ]]; then
+    SERVICE_USER=$(logname 2>/dev/null || echo "root")
+fi
 
 # ── Banner ────────────────────────────────────────────────────────────────────
 echo -e "${BOLD}${CYAN}"
 echo "╔═══════════════════════════════════════════════════╗"
-echo "║      CamillaDSP + GUI Web — Instalador v1.0       ║"
+echo "║      CamillaDSP + GUI Web — Instalador v2.0        ║"
 echo "╚═══════════════════════════════════════════════════╝"
 echo -e "${NC}"
+
+# ── Verificar root ────────────────────────────────────────────────────────────
+if [[ $EUID -ne 0 ]]; then
+    error "Este script requiere privilegios de root. Ejecutar con: sudo $0"
+    exit 1
+fi
+
+# Verificar que se ejecute con sudo desde usuario normal
+if [[ -z "${SUDO_USER:-}" ]] || [[ "${SUDO_USER}" == "root" ]]; then
+    error "Ejecuta como un usuario normal con sudo, no directamente como root."
+    echo "  Ejemplo: sudo bash install.sh"
+    exit 1
+fi
+
+info "Instalando para el usuario: ${SERVICE_USER}"
+
+# ── Detectar arquitectura ─────────────────────────────────────────────────────
+ARCH=$(uname -m)
+case "$ARCH" in
+    x86_64)  ARCH_NAME="amd64";  ARCH_LABEL="x86_64 (PC)" ;;
+    aarch64) ARCH_NAME="aarch64"; ARCH_LABEL="ARM64 (Raspberry Pi 4/5)" ;;
+    armv7l)  ARCH_NAME="armv7";   ARCH_LABEL="ARMv7 (Raspberry Pi 3)" ;;
+    armv6l)  ARCH_NAME="armv6";   ARCH_LABEL="ARMv6 (Raspberry Pi Zero)" ;;
+    *)
+        warn "Arquitectura '$ARCH' no reconocida."
+        ARCH_NAME="unknown"
+        ARCH_LABEL="Desconocida"
+        ;;
+esac
+info "Arquitectura detectada: $ARCH_NAME ($ARCH_LABEL)"
+
+# ── Detectar distribución y package manager ─────────────────────────────────
+detect_pkg_manager() {
+    if command -v apt-get &>/dev/null; then
+        PKG_MGR="apt"
+        PKG_UPDATE="apt-get update -qq"
+        PKG_INSTALL="apt-get install -y -qq"
+        PKG_DEPS="python3 python3-pip python3-venv git curl wget"
+        
+        UBUNTU_MAJOR=0
+        if [[ -f /etc/os-release ]]; then
+            source /etc/os-release
+            if [[ "$ID" == "ubuntu" ]]; then
+                UBUNTU_MAJOR=$(echo "$VERSION_ID" | cut -d. -f1)
+            fi
+        fi
+        
+        if [[ "$UBUNTU_MAJOR" -ge 24 ]]; then
+            PKG_DEPS="$PKG_DEPS libasound2t64"
+        else
+            PKG_DEPS="$PKG_DEPS libasound2"
+        fi
+    elif command -v pacman &>/dev/null; then
+        PKG_MGR="pacman"
+        PKG_UPDATE="pacman -Sy --noconfirm"
+        PKG_INSTALL="pacman -S --noconfirm --needed"
+        PKG_DEPS="python python-pip git curl wget alsa-lib"
+    elif command -v dnf &>/dev/null; then
+        PKG_MGR="dnf"
+        PKG_UPDATE="dnf check-update || true"
+        PKG_INSTALL="dnf install -y -q"
+        PKG_DEPS="python3 python3-pip git curl wget alsa-lib"
+    else
+        error "No se encontró gestor de paquetes compatible."
+        exit 1
+    fi
+    info "Gestor de paquetes: $PKG_MGR"
+}
+detect_pkg_manager
+
+# ── Auto-detectar última versión de CamillaDSP desde GitHub API ──────────────
+CDSP_API="https://api.github.com/repos/HEnquist/camilladsp/releases/latest"
+CDSP_VERSION=""
+CDSP_URL=""
+
+_fetch() {
+    if command -v curl &>/dev/null; then
+        curl -sfL "$1"
+    elif command -v wget &>/dev/null; then
+        wget -qO- "$1"
+    fi
+}
+
+_detect_cdsp_release() {
+    info "Consultando última versión en GitHub..."
+    local json
+    json=$(_fetch "$CDSP_API") || true
+
+    if [[ -z "$json" ]]; then
+        warn "No se pudo consultar la API de GitHub."
+        return 1
+    fi
+
+    CDSP_VERSION=$(echo "$json" | grep '"tag_name"' \
+        | sed 's/.*"tag_name"[[:space:]]*:[[:space:]]*"v\([^"]*\)".*/\1/' \
+        | head -1)
+
+    if [[ -z "$CDSP_VERSION" ]]; then
+        return 1
+    fi
+
+    info "Última versión disponible: v${CDSP_VERSION}"
+
+    CDSP_URL=$(echo "$json" \
+        | grep '"browser_download_url"' \
+        | grep "$ARCH_NAME" \
+        | grep '\.tar\.gz' \
+        | sed 's/.*"browser_download_url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' \
+        | head -1)
+
+    if [[ -z "$CDSP_URL" ]]; then
+        warn "No se encontró asset para $ARCH_NAME"
+        return 1
+    fi
+
+    info "URL del binario: $CDSP_URL"
+    return 0
+}
+
+_detect_cdsp_release || true
 
 # ── Verificar si existe instalación previa ─────────────────────────────────────
 if [[ -d "$INSTALL_DIR" ]]; then
@@ -59,169 +184,10 @@ if [[ -d "$INSTALL_DIR" ]]; then
     echo ""
 fi
 
-# ── Verificar root ────────────────────────────────────────────────────────────
-if [[ $EUID -ne 0 ]]; then
-    error "Este script requiere privilegios de root. Ejecutar con: sudo $0"
-    exit 1
-fi
-
-# ── Detectar arquitectura ─────────────────────────────────────────────────────
-ARCH=$(uname -m)
-case "$ARCH" in
-    x86_64)  ARCH_NAME="x86_64";  ARCH_LABEL="Intel/AMD 64-bit" ;;
-    aarch64) ARCH_NAME="aarch64"; ARCH_LABEL="ARM64 (Raspberry Pi 4/5, Apple M1...)" ;;
-    armv7l)  ARCH_NAME="armv7";   ARCH_LABEL="ARMv7 32-bit (Raspberry Pi 3...)" ;;
-    armv6l)  ARCH_NAME="armv6";   ARCH_LABEL="ARMv6 (Raspberry Pi 1/Zero)" ;;
-    *)
-        warn "Arquitectura '$ARCH' no reconocida. Se intentará compilar desde fuente."
-        ARCH_NAME="unknown"
-        ARCH_LABEL="Desconocida"
-        ;;
-esac
-info "Arquitectura detectada: $ARCH_NAME ($ARCH_LABEL)"
-
-# ── Detectar distribución y package manager ───────────────────────────────────
-detect_pkg_manager() {
-    if command -v apt-get &>/dev/null; then
-        PKG_MGR="apt"
-        PKG_UPDATE="apt-get update -qq"
-        PKG_INSTALL="apt-get install -y -qq"
-        PKG_DEPS="python3 python3-pip python3-venv git curl wget alsa-utils"
-    elif command -v pacman &>/dev/null; then
-        PKG_MGR="pacman"
-        PKG_UPDATE="pacman -Sy --noconfirm"
-        PKG_INSTALL="pacman -S --noconfirm --needed"
-        PKG_DEPS="python python-pip git curl wget alsa-utils"
-    elif command -v dnf &>/dev/null; then
-        PKG_MGR="dnf"
-        PKG_UPDATE="dnf check-update || true"
-        PKG_INSTALL="dnf install -y -q"
-        PKG_DEPS="python3 python3-pip git curl wget alsa-utils"
-    elif command -v yum &>/dev/null; then
-        PKG_MGR="yum"
-        PKG_UPDATE="yum check-update || true"
-        PKG_INSTALL="yum install -y -q"
-        PKG_DEPS="python3 python3-pip git curl wget alsa-utils"
-    else
-        error "No se encontró gestor de paquetes compatible (apt/pacman/dnf/yum)."
-        exit 1
-    fi
-    info "Gestor de paquetes: $PKG_MGR"
-}
-detect_pkg_manager
-
-# ── Auto-detectar última versión de CamillaDSP desde GitHub API ──────────────
-CDSP_API="https://api.github.com/repos/HEnquist/camilladsp/releases/latest"
-CDSP_VERSION=""
-CDSP_URL=""
-
-# ── Auto-detectar última versión de camillagui-backend desde GitHub API ───────
-BACKEND_API="https://api.github.com/repos/HEnquist/camillagui-backend/releases/latest"
-BACKEND_VERSION=""
-BACKEND_TAG=""
-
-_fetch() {
-    # Intenta con curl primero, luego wget
-    if command -v curl &>/dev/null; then
-        curl -sfL "$1"
-    elif command -v wget &>/dev/null; then
-        wget -qO- "$1"
-    fi
-}
-
-_detect_cdsp_release() {
-    info "Consultando última versión en GitHub..."
-    local json
-    json=$(_fetch "$CDSP_API") || true
-
-    if [[ -z "$json" ]]; then
-        warn "No se pudo consultar la API de GitHub. Verificar conexión a internet."
-        return 1
-    fi
-
-    # Extraer tag_name (ej: "v2.0.3")
-    CDSP_VERSION=$(echo "$json" | grep '"tag_name"' \
-        | sed 's/.*"tag_name"[[:space:]]*:[[:space:]]*"v\([^"]*\)".*/\1/' \
-        | head -1)
-
-    if [[ -z "$CDSP_VERSION" ]]; then
-        warn "No se pudo determinar la versión. Respuesta de la API inesperada."
-        return 1
-    fi
-
-    info "Última versión disponible: v${CDSP_VERSION}"
-
-    # Buscar la URL del asset según arquitectura
-    # Los assets de CamillaDSP siguen el patrón: camilladsp-vX.Y.Z-ARCH-TARGET.tar.gz
-    local arch_pattern
-    case "$ARCH_NAME" in
-        x86_64)  arch_pattern="x86_64" ;;
-        aarch64) arch_pattern="aarch64" ;;
-        armv7)   arch_pattern="armv7" ;;
-        armv6)   arch_pattern="armv6" ;;
-        *)       arch_pattern="" ;;
-    esac
-
-    if [[ -z "$arch_pattern" ]]; then
-        warn "No hay binario precompilado para $ARCH_NAME."
-        return 1
-    fi
-
-    CDSP_URL=$(echo "$json" \
-        | grep '"browser_download_url"' \
-        | grep "$arch_pattern" \
-        | grep '\.tar\.gz' \
-        | sed 's/.*"browser_download_url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' \
-        | head -1)
-
-    if [[ -z "$CDSP_URL" ]]; then
-        warn "No se encontró asset para arquitectura '$arch_pattern' en v${CDSP_VERSION}."
-        # Listar assets disponibles para ayudar al diagnóstico
-        info "Assets disponibles en esta release:"
-        echo "$json" | grep '"browser_download_url"' \
-            | sed 's/.*"browser_download_url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/  \1/' \
-            | head -20
-        return 1
-    fi
-
-    info "URL del binario: $CDSP_URL"
-    return 0
-}
-
-_detect_cdsp_release || true
-
-# ── Auto-detectar última versión de camillagui-backend ───────────────────────
-_detect_backend_release() {
-    info "Consultando última versión de camillagui-backend en GitHub..."
-    local json
-    json=$(_fetch "$BACKEND_API") || true
-
-    if [[ -z "$json" ]]; then
-        warn "No se pudo consultar la API de GitHub para el backend."
-        return 1
-    fi
-
-    BACKEND_TAG=$(echo "$json" \
-        | grep '"tag_name"' \
-        | sed 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' \
-        | head -1)
-
-    if [[ -z "$BACKEND_TAG" ]]; then
-        warn "No se pudo determinar la versión del backend. Se usará la rama principal."
-        return 1
-    fi
-
-    BACKEND_VERSION="$BACKEND_TAG"
-    info "Última versión de camillagui-backend: $BACKEND_TAG"
-    return 0
-}
-
-_detect_backend_release || true
-
 # ── Preguntar opciones ────────────────────────────────────────────────────────
 echo ""
 read -rp "Directorio de instalación [${INSTALL_DIR}]: " INPUT_DIR
-[[ -n "$INPUT_DIR" ]] && INSTALL_DIR="$INPUT_DIR" && BACKEND_DIR="$INSTALL_DIR/backend" && FRONTEND_DIR="$INSTALL_DIR/frontend"
+[[ -n "$INPUT_DIR" ]] && INSTALL_DIR="$INPUT_DIR"
 
 read -rp "¿Instalar CamillaDSP binary? [S/n]: " INSTALL_CDSP
 INSTALL_CDSP="${INSTALL_CDSP:-S}"
@@ -235,10 +201,9 @@ GUI_PORT="${GUI_PORT:-5005}"
 echo ""
 info "Configuración:"
 info "  Directorio:    $INSTALL_DIR"
-info "  CamillaDSP:    $(echo $INSTALL_CDSP | tr '[:lower:]' '[:upper:]')${CDSP_VERSION:+ (v${CDSP_VERSION})}"
-info "  Backend GUI:   ${BACKEND_TAG:-rama principal (sin releases detectados)}"
-info "  Servicio:      $(echo $CREATE_SERVICE | tr '[:lower:]' '[:upper:]')"
-info "  Puerto GUI:    $GUI_PORT"
+info "  CamillaDSP:   $(echo $INSTALL_CDSP | tr '[:lower:]' '[:upper:]')${CDSP_VERSION:+ (v${CDSP_VERSION})}"
+info "  Servicios:    $(echo $CREATE_SERVICE | tr '[:lower:]' '[:upper:]')"
+info "  Puerto GUI:   $GUI_PORT"
 echo ""
 read -rp "¿Continuar? [S/n]: " CONFIRM
 [[ "${CONFIRM:-S}" =~ ^[Nn] ]] && echo "Cancelado." && exit 0
@@ -253,6 +218,24 @@ info "Instalando paquetes: $PKG_DEPS"
 eval "$PKG_INSTALL $PKG_DEPS"
 success "Dependencias instaladas"
 
+# Verificar Python
+PYTHON_VERSION=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+PYTHON_MAJOR=$(echo "$PYTHON_VERSION" | cut -d. -f1)
+PYTHON_MINOR=$(echo "$PYTHON_VERSION" | cut -d. -f2)
+
+if [[ "$PYTHON_MAJOR" -lt 3 ]] || ([[ "$PYTHON_MAJOR" -eq 3 ]] && [[ "$PYTHON_MINOR" -lt 9 ]]; then
+    error "Python 3.9+ requerido. Encontrado: $PYTHON_VERSION"
+    exit 1
+fi
+success "Python ${PYTHON_VERSION} ✓"
+
+# Verificar git
+if ! command -v git &>/dev/null; then
+    error "git no encontrado."
+    exit 1
+fi
+success "git $(git --version | awk '{print $3}') ✓"
+
 # ══════════════════════════════════════════════════════════════════════════════
 step "2/6 — Instalando CamillaDSP"
 # ══════════════════════════════════════════════════════════════════════════════
@@ -261,32 +244,23 @@ if [[ "${INSTALL_CDSP^^}" != "N" ]]; then
         info "Descargando CamillaDSP v${CDSP_VERSION} para ${ARCH_NAME}..."
         TMP_DIR=$(mktemp -d)
         cd "$TMP_DIR"
-        if wget -q --show-progress "$CDSP_URL" -O camilladsp.tar.gz 2>&1; then
+        if _fetch "$CDSP_URL" -o camilladsp.tar.gz; then
             tar xzf camilladsp.tar.gz
             CDSP_BIN=$(find . -name "camilladsp" -type f | head -1)
             if [[ -n "$CDSP_BIN" ]]; then
                 install -m 755 "$CDSP_BIN" "$CAMILLADSP_BIN"
-                success "CamillaDSP instalado en $CAMILLADSP_BIN"
+                CDSP_VER=$("$CAMILLADSP_BIN" --version 2>&1 | head -1 || echo "desconocida")
+                success "CamillaDSP instalado: $CDSP_VER"
             else
-                warn "No se encontró binario en el archivo. Verificar manualmente."
+                warn "No se encontró binario en el archivo."
             fi
         else
             warn "No se pudo descargar el binario precompilado."
-            warn "Descarga manual desde: $CAMILLADSP_REPO/releases"
         fi
         rm -rf "$TMP_DIR"
     else
         warn "No hay binario precompilado para $ARCH_NAME."
-        warn "Compilar manualmente: $CAMILLADSP_REPO"
     fi
-
-    # Verificar
-    if command -v camilladsp &>/dev/null; then
-        CDSP_VER=$(camilladsp --version 2>&1 | head -1 || echo "desconocida")
-        success "CamillaDSP: $CDSP_VER"
-    fi
-else
-    info "Instalación de CamillaDSP omitida."
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -294,80 +268,60 @@ step "3/6 — Instalando camillagui-backend"
 # ══════════════════════════════════════════════════════════════════════════════
 mkdir -p "$INSTALL_DIR"
 
-if [[ -d "$BACKEND_DIR/.git" ]]; then
-    warn "El directorio del backend ya existe: $BACKEND_DIR"
-    read -rp "¿Desea eliminarlo y hacer una instalación limpia? [s/N]: " CLEAN_INSTALL
-    if [[ "${CLEAN_INSTALL^^}" == "S" ]]; then
-        info "Eliminando instalación anterior..."
-        rm -rf "$BACKEND_DIR"
+# Clonar backend
+if [[ -d "$INSTALL_DIR/backend/.git" ]]; then
+    warn "El directorio del backend ya existe"
+    read -rp "¿Desea eliminarlo y hacer una instalación limpia? [s/N]: " CLEAN_BACKEND
+    if [[ "${CLEAN_BACKEND^^}" == "S" ]]; then
+        rm -rf "$INSTALL_DIR/backend"
     else
-        info "Actualizando instalación existente..."
-        cd "$BACKEND_DIR"
+        cd "$INSTALL_DIR/backend"
         git fetch --tags 2>&1 | tail -3 || true
-        if [[ -n "$BACKEND_TAG" ]]; then
-            info "Cambiando a versión $BACKEND_TAG..."
-            git checkout "$BACKEND_TAG" 2>&1 | tail -3 \
-                || git pull --ff-only 2>&1 | tail -3 || true
-        else
-            git pull --ff-only 2>&1 | tail -3 || true
-        fi
+        git pull --ff-only 2>&1 | tail -3 || true
     fi
 fi
 
-if [[ ! -d "$BACKEND_DIR/.git" ]]; then
-    if [[ -n "$BACKEND_TAG" ]]; then
-        info "Clonando camillagui-backend $BACKEND_TAG..."
-        git clone --depth=1 --branch "$BACKEND_TAG" "$BACKEND_REPO" "$BACKEND_DIR"
-    else
-        info "Clonando camillagui-backend (rama principal)..."
-        git clone --depth=1 "$BACKEND_REPO" "$BACKEND_DIR"
-    fi
+if [[ ! -d "$INSTALL_DIR/backend/.git" ]]; then
+    info "Clonando camillagui-backend..."
+    git clone --depth=1 "$BACKEND_REPO" "$INSTALL_DIR/backend"
 fi
-success "Backend en $BACKEND_DIR${BACKEND_TAG:+ — versión $BACKEND_TAG}"
+success "Backend instalado en $INSTALL_DIR/backend"
 
-# Entorno virtual Python
+# Crear entorno virtual
 info "Creando entorno virtual Python..."
-cd "$BACKEND_DIR"
-python3 -m venv venv
-source venv/bin/activate
+python3 -m venv "$INSTALL_DIR/backend/venv"
+"$INSTALL_DIR/backend/venv/bin/pip" install --quiet --upgrade pip
 
+# Instalar dependencias
 info "Instalando dependencias Python..."
-pip install --quiet --upgrade pip
-if [[ -f requirements.txt ]]; then
-    pip install --quiet -r requirements.txt
-else
-    pip install --quiet aiohttp coloredlogs pyyaml websocket-client git+https://github.com/HEnquist/pycamilladsp.git
-fi
-deactivate
+"$INSTALL_DIR/backend/venv/bin/pip" install --quiet aiohttp pyyaml
+"$INSTALL_DIR/backend/venv/bin/pip" install --quiet "camilladsp @ git+https://github.com/HEnquist/pycamilladsp.git"
+"$INSTALL_DIR/backend/venv/bin/pip" install --quiet "camilladsp-plot @ git+https://github.com/HEnquist/pycamilladsp-plot.git"
 success "Dependencias Python instaladas"
 
 # ══════════════════════════════════════════════════════════════════════════════
 step "4/6 — Instalando frontend web"
 # ══════════════════════════════════════════════════════════════════════════════
-GUI_DEST="$BACKEND_DIR/gui"
+GUI_DEST="$INSTALL_DIR/backend/build"
 mkdir -p "$GUI_DEST"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Detectar si el script se ejecuta desde dentro del repositorio clonado
-# (existe index.html en el mismo directorio del script)
 if [[ -f "$SCRIPT_DIR/index.html" ]]; then
-    info "Copiando frontend desde $SCRIPT_DIR a $GUI_DEST..."
+    info "Copiando frontend local..."
     if command -v rsync &>/dev/null; then
         rsync -a --exclude='.git' --exclude='.claude' --exclude='install.sh' \
             "$SCRIPT_DIR/" "$GUI_DEST/"
     else
         cp -r "$SCRIPT_DIR"/index.html "$GUI_DEST/"
-        cp -r "$SCRIPT_DIR"/js         "$GUI_DEST/"
-        cp -r "$SCRIPT_DIR"/style      "$GUI_DEST/"
-        [[ -d "$SCRIPT_DIR/assets" ]] && cp -r "$SCRIPT_DIR"/assets "$GUI_DEST/"
+        cp -r "$SCRIPT_DIR"/js         "$GUI_DEST/" 2>/dev/null || true
+        cp -r "$SCRIPT_DIR"/style      "$GUI_DEST/" 2>/dev/null || true
+        cp -r "$SCRIPT_DIR"/assets     "$GUI_DEST/" 2>/dev/null || true
     fi
     success "Frontend copiado a $GUI_DEST"
 else
-    # El script se ejecutó desde un directorio diferente — clonar desde GitHub
-    info "Clonando frontend desde $FRONTEND_REPO..."
+    info "Clonando frontend desde GitHub..."
     if [[ -d "$GUI_DEST/.git" ]]; then
-        info "Frontend ya existe, actualizando..."
         cd "$GUI_DEST"
         git pull --ff-only 2>&1 | tail -3 || true
     else
@@ -377,157 +331,151 @@ else
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════
-step "5/6 — Configurando backend"
+step "5/6 — Configurando"
 # ══════════════════════════════════════════════════════════════════════════════
-# Crear/actualizar config del backend si no existe
-BACKEND_CFG="$BACKEND_DIR/config/camillagui.yml"
-mkdir -p "$(dirname "$BACKEND_CFG")"
+mkdir -p "$CONFIG_DIR/configs" "$CONFIG_DIR/coeffs"
 
-if [[ ! -f "$BACKEND_CFG" ]]; then
-    info "Creando configuración básica del backend..."
-    cat > "$BACKEND_CFG" << EOF
+# camillagui.yml
+info "Creando configuración del backend..."
+cat > "$CONFIG_DIR/camillagui.yml" << EOF
 ---
-camilla_host: 0.0.0.0
+camilla_host: "localhost"
 camilla_port: 1234
+bind_address: "0.0.0.0"
 port: ${GUI_PORT}
 ssl_certificate: null
 ssl_private_key: null
-config_dir: /etc/camilladsp/configs
-coeff_dir: /etc/camilladsp/coeffs
-default_config: default.yml
-active_config: active.yml
-can_update_active_config: true
+gui_config_file: null
+config_dir: "${CONFIG_DIR}/configs"
+coeff_dir: "${CONFIG_DIR}/coeffs"
+default_config: "${CONFIG_DIR}/configs/default.yml"
+statefile_path: "${CONFIG_DIR}/statefile.yml"
+log_file: null
+on_set_active_config: null
+on_get_active_config: null
 supported_capture_types: null
 supported_playback_types: null
 EOF
-    success "Configuración backend creada: $BACKEND_CFG"
-else
-    info "Configuración del backend ya existe, no se sobreescribe."
-fi
+success "camillagui.yml creado"
 
-# Directorio de configs de CamillaDSP
-mkdir -p /etc/camilladsp/configs /etc/camilladsp/coeffs
+# Statefile
+touch "$CONFIG_DIR/statefile.yml"
 
-# Config por defecto si no existe
-DEFAULT_CFG="/etc/camilladsp/configs/default.yml"
+# default.yml
+DEFAULT_CFG="$CONFIG_DIR/configs/default.yml"
 if [[ ! -f "$DEFAULT_CFG" ]]; then
+    info "Creando configuración inicial de audio..."
     cat > "$DEFAULT_CFG" << 'EOF'
 ---
-description: default
 devices:
-  adjust_period: null
-  capture:
-    channels: 2
-    device: 'null'
-    format: null
-    labels: null
-    link_mute_control: null
-    link_volume_control: null
-    stop_on_inactive: null
-    type: Alsa
-  capture_samplerate: 48000
-  chunksize: 1024
-  enable_rate_adjust: null
-  multithreaded: null
-  playback:
-    channels: 2
-    device: 'null'
-    format: null
-    type: Alsa
-  queuelimit: null
-  rate_measure_interval: null
-  resampler: null
   samplerate: 48000
-  silence_threshold: null
-  silence_timeout: null
-  stop_on_rate_change: null
-  target_level: null
-  volume_limit: null
-  volume_ramp_time: null
-  worker_threads: null
-filters: {}
-mixers:
-  Unnamed Mixer 1:
-    channels:
-      in: 2
-      out: 2
-    description: null
-    labels: null
-    mapping: []
-pipeline: []
-processors: {}
-title: default
+  chunksize: 1024
+  enable_rate_adjust: true
+  capture:
+    type: Alsa
+    channels: 2
+    device: "hw:0,0"
+    format: S32_LE
+  playback:
+    type: Alsa
+    channels: 2
+    device: "hw:0,0"
+    format: S32_LE
+
+filters:
+  pass_through:
+    type: Gain
+    parameters:
+      gain: 0
+      inverted: false
+
+mixers: {}
+
+pipeline:
+  - type: Filter
+    channels: [0, 1]
+    names:
+      - pass_through
 EOF
-    success "Configuración por defecto creada: $DEFAULT_CFG"
+    success "Configuración inicial creada: $DEFAULT_CFG"
+    info "IMPORTANTE: Edita $DEFAULT_CFG con tus dispositivos de audio"
+    info "  Usa 'aplay -l' y 'arecord -l' para listar dispositivos"
+else
+    info "Configuración existente mantenida"
 fi
 
-ACTIVE_CFG="/etc/camilladsp/configs/active.yml"
-if [[ ! -f "$ACTIVE_CFG" ]]; then
-    cp "$DEFAULT_CFG" "$ACTIVE_CFG"
-    success "Configuración activa creada: $ACTIVE_CFG"
-fi
-
-STATEFILE="$INSTALL_DIR/camilladsp_state.yml"
-cat > "$STATEFILE" << EOF
----
-config_file: $ACTIVE_CFG
-EOF
-success "Statefile creado: $STATEFILE"
-
-# ═══════════════════════════════════════════════════════════════════════════════
-step "6/6 — Servicio systemd"
+# ══════════════════════════════════════════════════════════════════════════════
+step "6/6 — Servicios systemd"
 # ══════════════════════════════════════════════════════════════════════════════
 if [[ "${CREATE_SERVICE^^}" != "N" ]] && command -v systemctl &>/dev/null; then
+    # Grupo realtime
+    if ! getent group realtime &>/dev/null; then
+        groupadd --system realtime 2>/dev/null || true
+    fi
+
+    # Agregar usuario a grupos
+    usermod -aG audio "$SERVICE_USER" 2>/dev/null || true
+    usermod -aG realtime "$SERVICE_USER" 2>/dev/null || true
 
     # Servicio camilladsp-engine
-    STATEFILE="$INSTALL_DIR/camilladsp_state.yml"
-    cat > /etc/systemd/system/camilladsp-engine.service << EOF
+    cat > "${SYSTEMD_DIR}/camilladsp-engine.service" << EOF
 [Unit]
-Description=CamillaDSP Audio Processor
+Description=CamillaDSP Audio Processing Engine v4.x
 After=sound.target
+Wants=sound.target
 
 [Service]
 Type=simple
-User=$SERVICE_USER
-ExecStart=$CAMILLADSP_BIN -p 1234 -a 0.0.0.0 -s $STATEFILE
+User=${SERVICE_USER}
+Group=audio
+SupplementaryGroups=realtime
+Nice=-10
+IOSchedulingClass=realtime
+IOSchedulingPriority=0
+
+ExecStart=${CAMILLADSP_BIN} -p 1234 -a 0.0.0.0 -w ${DEFAULT_CFG}
 Restart=on-failure
 RestartSec=5
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-    # Servicio camillagui-backend
-    cat > /etc/systemd/system/camillagui.service << EOF
+    # Servicio camillagui
+    cat > "${SYSTEMD_DIR}/camillagui.service" << EOF
 [Unit]
-Description=CamillaGUI Web Backend
+Description=CamillaDSP GUI Backend (Python/aiohttp)
 After=network.target camilladsp-engine.service
+Wants=camilladsp-engine.service
 
 [Service]
 Type=simple
-User=$SERVICE_USER
-WorkingDirectory=$BACKEND_DIR
-ExecStart=$BACKEND_DIR/venv/bin/python $BACKEND_DIR/main.py
+User=${SERVICE_USER}
+WorkingDirectory=${INSTALL_DIR}/backend
+Environment=PYTHONUNBUFFERED=1
+ExecStart=${INSTALL_DIR}/backend/venv/bin/python main.py -c ${CONFIG_DIR}/camillagui.yml
 Restart=on-failure
 RestartSec=5
-Environment="PYTHONUNBUFFERED=1"
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
     systemctl daemon-reload
-    systemctl enable camillagui.service || true
-    systemctl enable camilladsp-engine.service || true
+    systemctl enable camilladsp-engine.service camillagui.service || true
     success "Servicios systemd creados y habilitados"
-    info "Para iniciar ahora: sudo systemctl start camilladsp-engine camillagui"
-else
-    info "Servicio systemd omitido."
-    info "Para iniciar manualmente:"
-    info "  cd $BACKEND_DIR && source venv/bin/activate && python main.py"
+
+    # Corregir permisos
+    chown -R "${SERVICE_USER}:${SERVICE_USER}" "$CONFIG_DIR"
+    chown -R "${SERVICE_USER}:${SERVICE_USER}" "$INSTALL_DIR/backend/build"
+    chmod 600 "$CONFIG_DIR/statefile.yml"
 fi
 
-# ══════════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════════════
 echo ""
 echo -e "${BOLD}${GREEN}════════════════════════════════════════"
 echo "  Instalación completada correctamente"
@@ -537,15 +485,11 @@ info "Acceder a la interfaz web:"
 LOCAL_IP=$(hostname -I 2>/dev/null | awk '{print $1}' || echo "localhost")
 echo -e "  ${BOLD}http://${LOCAL_IP}:${GUI_PORT}${NC}"
 echo ""
-info "Conectar con IP del servidor CamillaDSP y puerto 1234"
+info "Comandos útiles:"
+echo "  sudo systemctl start camilladsp-engine camillagui"
+echo "  sudo systemctl status camilladsp-engine camillagui"
+echo "  sudo journalctl -u camilladsp-engine -f"
 echo ""
-
-# Resumen
-if command -v systemctl &>/dev/null && systemctl is-enabled camillagui.service &>/dev/null; then
-    echo -e "Comandos útiles:"
-    echo "  sudo systemctl start   camilladsp-engine camillagui"
-    echo "  sudo systemctl stop    camillagui camilladsp-engine"
-    echo "  sudo systemctl status  camilladsp-engine camillagui"
-    echo "  sudo journalctl -u camilladsp-engine -f"
-    echo "  sudo journalctl -u camillagui -f"
-fi
+echo -e "${YELLOW}IMPORTANTE:${NC} Cierra sesión y vuelve a entrar para que los cambios"
+echo "de grupo (audio, realtime) tomen efecto."
+echo ""
