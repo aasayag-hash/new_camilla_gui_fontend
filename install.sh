@@ -313,7 +313,7 @@ pip install --quiet --upgrade pip
 if [[ -f requirements.txt ]]; then
     pip install --quiet -r requirements.txt
 else
-    pip install --quiet aiohttp coloredlogs pyyaml "pycamilladsp@git+https://github.com/HEnquist/pycamilladsp.git"
+    pip install --quiet aiohttp coloredlogs pyyaml websocket-client git+https://github.com/HEnquist/pycamilladsp.git
 fi
 deactivate
 success "Dependencias Python instaladas"
