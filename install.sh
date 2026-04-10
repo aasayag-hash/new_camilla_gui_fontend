@@ -225,35 +225,39 @@ if [[ ! -f "$CONFIG_DIR/configs/default.yml" ]]; then
 devices:
   samplerate: 48000
   chunksize: 1024
-  enable_rate_adjust: true
+  queuelimit: 4
   capture:
     type: Alsa
     channels: 2
-    device: "hw:0,0"
-    format: S32_LE
+    format: null
+    device: 'null'
   playback:
     type: Alsa
     channels: 2
-    device: "hw:0,0"
-    format: S32_LE
-
-filters:
-  pass_through:
-    type: Gain
-    parameters:
-      gain: 0
-      inverted: false
-
-mixers: {}
-
+    format: null
+    device: 'null'
+mixers:
+  GlobalMixer:
+    channels:
+      in: 2
+      out: 2
+    mapping:
+      - dest: 0
+        sources:
+          - channel: 0
+            gain: 0
+            inverted: false
+      - dest: 1
+        sources:
+          - channel: 1
+            gain: 0
+            inverted: false
+filters: {}
 pipeline:
-  - type: Filter
-    channels: [0, 1]
-    names:
-      - pass_through
+  - type: Mixer
+    name: GlobalMixer
 EOF
-    info "Configuración inicial creada"
-    info "Edita /etc/camilladsp/configs/default.yml con tus dispositivos de audio"
+    log "Configuración inicial creada"
 fi
 log "Configuración lista"
 
