@@ -13,49 +13,23 @@ import { initMixerTab }      from './tabs/mixer/mixerTab.js';
 import { Events }            from './core/events.js';
 import { t }                 from './core/i18n.js';
 import * as API              from './core/api.js';
-import { reloadConfig, setFullConfig } from './core/state.js';
+import { reloadConfig }      from './core/state.js';
 
 const DEFAULT_IP = 'localhost';
 const DEFAULT_PORT = '5005';
-
-function showErrorPanel(err, details) {
-    const loginScreen = document.getElementById('screen-login');
-    const appScreen = document.getElementById('screen-app');
-    const statusEl = document.getElementById('login-status');
-    
-    loginScreen.style.display = 'flex';
-    appScreen.style.display = 'none';
-    
-    const errorMsg = `
-        <div style="text-align: left; max-width: 400px; margin: 0 auto;">
-            <strong style="color: #ff6b6b;">Error de conexión:</strong><br>
-            <pre style="background: #1a1a2e; padding: 10px; border-radius: 4px; 
-                        overflow-x: auto; font-size: 11px; color: #ccc;">
-${details}
-            </pre>
-            <br>
-            <strong>Posibles soluciones:</strong><br>
-            <ul style="text-align: left; font-size: 12px;">
-                <li>Verifica que el servicio esté corriendo: <code>sudo systemctl status camillagui</code></li>
-                <li>El backend debe estar en puerto ${DEFAULT_PORT}</li>
-                <li>Intenta conectar manualmente con IP del servidor</li>
-            </ul>
-        </div>
-    `;
-    statusEl.innerHTML = errorMsg;
-    statusEl.className = 'error';
-}
 
 function autoConnect() {
     const base = `http://${DEFAULT_IP}:${DEFAULT_PORT}`;
     window.CAMILLA_BASE = base;
     
     const statusEl = document.getElementById('login-status');
-    const loginScreen = document.getElementById('screen-login');
     const appScreen = document.getElementById('screen-app');
+    const debugPanel = document.getElementById('debug-panel');
     
-    loginScreen.style.display = 'flex';
-    appScreen.style.display = 'none';
+    appScreen.style.display = 'flex';
+    if (debugPanel) debugPanel.style.display = 'block';
+    
+    document.getElementById('app-title').textContent = `Conectando a ${base}...`;
     statusEl.textContent = `Conectando a ${base}...`;
     statusEl.className = '';
     
@@ -66,12 +40,8 @@ function autoConnect() {
             console.log('[AutoConnect] Estado recibido:', data);
             statusEl.textContent = `✓ Conectado a ${base}`;
             statusEl.className = 'ok';
-            return reloadConfig();
-        })
-        .then(() => {
-            loginScreen.style.display = 'none';
-            appScreen.style.display = 'flex';
             document.getElementById('app-title').textContent = t('title');
+            return reloadConfig();
         })
         .catch(err => {
             console.error('[AutoConnect] Error:', err);
@@ -81,7 +51,20 @@ function autoConnect() {
             if (err.statusText) details += `Status Text: ${err.statusText}\n`;
             details += `\nTiempo: ${new Date().toLocaleString()}`;
             
-            showErrorPanel(err, details);
+            statusEl.innerHTML = `
+                <div style="text-align: left; padding: 10px;">
+                    <strong style="color: #ff6b6b;">⚠ Error de conexión:</strong>
+                    <pre style="background: #1a1a2e; padding: 8px; border-radius: 4px; 
+                                overflow-x: auto; font-size: 11px; color: #ccc; margin-top:8px;">
+${details}
+                    </pre>
+                    <div style="margin-top:10px; font-size:12px; color:#aaa;">
+                        Verifica: <code>sudo systemctl status camillagui</code>
+                    </div>
+                </div>
+            `;
+            statusEl.className = 'error';
+            document.getElementById('app-title').textContent = '⚠ Sin conexión - CamillaDSP';
         });
 }
 
@@ -99,10 +82,8 @@ async function bootstrap() {
         showApp(ip, port);
     });
 
-    // Intentar conexión automática primero
     autoConnect();
 
-    // Modales
     document.querySelectorAll('.modal-close').forEach(btn => {
         btn.addEventListener('click', () => {
             btn.closest('.modal-overlay')?.classList.add('hidden');

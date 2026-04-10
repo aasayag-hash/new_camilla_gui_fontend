@@ -5,36 +5,95 @@ function base() {
     return window.CAMILLA_BASE || 'http://localhost:5005';
 }
 
+function debugLog(type, method, path, data, response) {
+    const panel = document.getElementById('debug-output');
+    if (!panel) return;
+    
+    const timestamp = new Date().toLocaleTimeString();
+    const color = type === 'SEND' ? '#4ade80' : type === 'RECV' ? '#60a5fa' : '#f87171';
+    const arrow = type === 'SEND' ? '→' : type === 'RECV' ? '←' : '✕';
+    
+    let content = `<span style="color:#666">[${timestamp}]</span> <span style="color:${color}">${arrow} ${method} ${path}</span>`;
+    
+    if (type === 'SEND' && data) {
+        const dataStr = typeof data === 'string' ? data : JSON.stringify(data, null, 2);
+        content += `<pre style="margin:2px 0 5px 20px; color:#888; font-size:10px; max-height:60px; overflow:auto;">${dataStr.substring(0, 500)}</pre>`;
+    }
+    
+    if (type === 'RECV' && response) {
+        const respStr = typeof response === 'string' ? response : JSON.stringify(response, null, 2);
+        content += `<pre style="margin:2px 0 5px 20px; color:#aaa; font-size:10px; max-height:80px; overflow:auto;">${respStr.substring(0, 800)}</pre>`;
+    }
+    
+    if (type === 'ERROR') {
+        content += `<span style="color:#f87171"> - ${data}</span>`;
+    }
+    
+    const div = document.createElement('div');
+    div.innerHTML = content;
+    div.style.marginBottom = '5px';
+    panel.appendChild(div);
+    panel.scrollTop = panel.scrollHeight;
+}
+
 async function get(path) {
-    const r = await fetch(`${base()}${path}`, { cache: 'no-store' });
-    if (!r.ok) throw new Error(`HTTP ${r.status} en GET ${path}`);
-    const ct = r.headers.get('content-type') || '';
-    if (ct.includes('application/json')) return r.json();
-    return r.text();
+    debugLog('SEND', 'GET', path, null, null);
+    try {
+        const r = await fetch(`${base()}${path}`, { cache: 'no-store' });
+        if (!r.ok) {
+            debugLog('ERROR', 'GET', path, `HTTP ${r.status}`, null);
+            throw new Error(`HTTP ${r.status} en GET ${path}`);
+        }
+        const ct = r.headers.get('content-type') || '';
+        let data;
+        if (ct.includes('application/json')) {
+            data = await r.json();
+        } else {
+            data = await r.text();
+        }
+        debugLog('RECV', 'GET', path, null, data);
+        return data;
+    } catch (err) {
+        debugLog('ERROR', 'GET', path, err.message, null);
+        throw err;
+    }
 }
 
 async function post(path, body, isText = false) {
-    const opts = {
-        method: 'POST',
-        cache: 'no-store',
-    };
-    if (body instanceof FormData) {
-        opts.body = body;
-    } else if (isText) {
-        opts.headers = { 'Content-Type': 'text/plain' };
-        opts.body = body;
-    } else {
-        opts.headers = { 'Content-Type': 'application/json' };
-        opts.body = typeof body === 'string' ? body : JSON.stringify(body);
+    debugLog('SEND', 'POST', path, body, null);
+    try {
+        const opts = {
+            method: 'POST',
+            cache: 'no-store',
+        };
+        if (body instanceof FormData) {
+            opts.body = body;
+        } else if (isText) {
+            opts.headers = { 'Content-Type': 'text/plain' };
+            opts.body = body;
+        } else {
+            opts.headers = { 'Content-Type': 'application/json' };
+            opts.body = typeof body === 'string' ? body : JSON.stringify(body);
+        }
+        const r = await fetch(`${base()}${path}`, opts);
+        if (!r.ok) {
+            const txt = await r.text();
+            debugLog('ERROR', 'POST', path, `HTTP ${r.status}: ${txt}`, null);
+            throw new Error(`HTTP ${r.status} en POST ${path}: ${txt}`);
+        }
+        const ct = r.headers.get('content-type') || '';
+        let data;
+        if (ct.includes('application/json')) {
+            data = await r.json();
+        } else {
+            data = await r.text();
+        }
+        debugLog('RECV', 'POST', path, null, data);
+        return data;
+    } catch (err) {
+        debugLog('ERROR', 'POST', path, err.message, null);
+        throw err;
     }
-    const r = await fetch(`${base()}${path}`, opts);
-    if (!r.ok) {
-        const txt = await r.text();
-        throw new Error(`HTTP ${r.status} en POST ${path}: ${txt}`);
-    }
-    const ct = r.headers.get('content-type') || '';
-    if (ct.includes('application/json')) return r.json();
-    return r.text();
 }
 
 // ── Status ──────────────────────────────────────────────────────────

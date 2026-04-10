@@ -225,7 +225,7 @@ if [[ ! -f "$CONFIG_DIR/configs/default.yml" ]]; then
 devices:
   samplerate: 48000
   chunksize: 1024
-  queuelimit: null
+  queuelimit: 0
   capture:
     type: Alsa
     channels: 2
