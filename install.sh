@@ -267,6 +267,7 @@ fi
 step "3/6 — Instalando camillagui-backend"
 # ══════════════════════════════════════════════════════════════════════════════
 mkdir -p "$INSTALL_DIR"
+cd "$INSTALL_DIR"
 
 # Clonar backend
 if [[ -d "$INSTALL_DIR/backend/.git" ]]; then
