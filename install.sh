@@ -36,6 +36,29 @@ echo "║      CamillaDSP + GUI Web — Instalador v1.0       ║"
 echo "╚═══════════════════════════════════════════════════╝"
 echo -e "${NC}"
 
+# ── Verificar si existe instalación previa ─────────────────────────────────────
+if [[ -d "$INSTALL_DIR" ]]; then
+    warn "Ya existe una instalación en: $INSTALL_DIR"
+    echo ""
+    echo "Para desinstalar manualmente, ejecuta:"
+    echo "  sudo systemctl stop camilladsp-engine camillagui 2>/dev/null || true"
+    echo "  sudo systemctl disable camilladsp-engine camillagui 2>/dev/null || true"
+    echo "  sudo rm -f /etc/systemd/system/camilladsp-engine.service /etc/systemd/system/camillagui.service"
+    echo "  sudo systemctl daemon-reload"
+    echo "  sudo rm -rf $INSTALL_DIR"
+    echo ""
+    read -rp "¿Desea eliminar la instalación existente y hacer una instalación limpia? [s/N]: " CLEAN_INSTALL
+    if [[ "${CLEAN_INSTALL^^}" == "S" ]]; then
+        info "Deteniendo servicios..."
+        systemctl stop camilladsp-engine camillagui 2>/dev/null || true
+        info "Eliminando instalación anterior..."
+        rm -rf "$INSTALL_DIR"
+    else
+        info "Actualizando instalación existente..."
+    fi
+    echo ""
+fi
+
 # ── Verificar root ────────────────────────────────────────────────────────────
 if [[ $EUID -ne 0 ]]; then
     error "Este script requiere privilegios de root. Ejecutar con: sudo $0"
@@ -390,42 +413,58 @@ DEFAULT_CFG="/etc/camilladsp/configs/default.yml"
 if [[ ! -f "$DEFAULT_CFG" ]]; then
     cat > "$DEFAULT_CFG" << 'EOF'
 ---
+description: default
 devices:
-  samplerate: 48000
-  chunksize: 1024
-  queuelimit: 4
+  adjust_period: null
   capture:
-    type: Alsa
     channels: 2
-    format: S32LE
-    device: hw:0
+    device: 'null'
+    format: null
+    labels: null
+    link_mute_control: null
+    link_volume_control: null
+    stop_on_inactive: null
+    type: Alsa
+  capture_samplerate: 48000
+  chunksize: 1024
+  enable_rate_adjust: null
+  multithreaded: null
   playback:
-    type: Alsa
     channels: 2
-    format: S32LE
-    device: hw:0
+    device: 'null'
+    format: null
+    type: Alsa
+  queuelimit: null
+  rate_measure_interval: null
+  resampler: null
+  samplerate: 48000
+  silence_threshold: null
+  silence_timeout: null
+  stop_on_rate_change: null
+  target_level: null
+  volume_limit: null
+  volume_ramp_time: null
+  worker_threads: null
+filters: {}
 mixers:
-  GlobalMixer:
+  Unnamed Mixer 1:
     channels:
       in: 2
       out: 2
-    mapping:
-      - dest: 0
-        sources:
-          - channel: 0
-            gain: 0
-            inverted: false
-      - dest: 1
-        sources:
-          - channel: 1
-            gain: 0
-            inverted: false
-filters: {}
-pipeline:
-  - type: Mixer
-    name: GlobalMixer
+    description: null
+    labels: null
+    mapping: []
+pipeline: []
+processors: {}
+title: default
 EOF
     success "Configuración por defecto creada: $DEFAULT_CFG"
+fi
+
+ACTIVE_CFG="/etc/camilladsp/configs/active.yml"
+if [[ ! -f "$ACTIVE_CFG" ]]; then
+    cp "$DEFAULT_CFG" "$ACTIVE_CFG"
+    success "Configuración activa creada: $ACTIVE_CFG"
 fi
 
 # ══════════════════════════════════════════════════════════════════════════════
