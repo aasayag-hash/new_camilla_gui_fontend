@@ -223,7 +223,7 @@ PYTHON_VERSION=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.v
 PYTHON_MAJOR=$(echo "$PYTHON_VERSION" | cut -d. -f1)
 PYTHON_MINOR=$(echo "$PYTHON_VERSION" | cut -d. -f2)
 
-if [[ "$PYTHON_MAJOR" -lt 3 ]] || ([[ "$PYTHON_MAJOR" -eq 3 ]] && [[ "$PYTHON_MINOR" -lt 9 ]]; then
+if [[ "$PYTHON_MAJOR" -lt 3 || ( "$PYTHON_MAJOR" -eq 3 && "$PYTHON_MINOR" -lt 9 ) ]]; then
     error "Python 3.9+ requerido. Encontrado: $PYTHON_VERSION"
     exit 1
 fi
