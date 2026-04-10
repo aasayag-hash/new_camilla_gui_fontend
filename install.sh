@@ -6,6 +6,8 @@
 # ═══════════════════════════════════════════════════════════════════════════════
 set -euo pipefail
 
+git config --global advice.detachedHead false
+
 # ── Colores ───────────────────────────────────────────────────────────────────
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'
 BLUE='\033[0;34m'; CYAN='\033[0;36m'; BOLD='\033[1m'; NC='\033[0m'
@@ -302,7 +304,7 @@ pip install --quiet --upgrade pip
 if [[ -f requirements.txt ]]; then
     pip install --quiet -r requirements.txt
 else
-    pip install --quiet aiohttp coloredlogs pycamilladsp pyyaml
+    pip install --quiet aiohttp coloredlogs pyyaml "pycamilladsp@git+https://github.com/HEnquist/pycamilladsp.git"
 fi
 deactivate
 success "Dependencias Python instaladas"
