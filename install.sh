@@ -269,7 +269,7 @@ fi
 step "3/6 — Instalando camillagui-backend"
 # ══════════════════════════════════════════════════════════════════════════════
 mkdir -p "$INSTALL_DIR"
-cd "$INSTALL_DIR"
+cd /
 
 # Clonar backend
 if [[ -d "$INSTALL_DIR/backend/.git" ]]; then
@@ -277,14 +277,11 @@ if [[ -d "$INSTALL_DIR/backend/.git" ]]; then
     read -rp "¿Desea eliminarlo y hacer una instalación limpia? [s/N]: " CLEAN_BACKEND
     if [[ "${CLEAN_BACKEND^^}" == "S" ]]; then
         rm -rf "$INSTALL_DIR/backend"
+        git clone --depth=1 "$BACKEND_REPO" "$INSTALL_DIR/backend"
     else
-        cd "$INSTALL_DIR/backend"
-        git fetch --tags 2>&1 | tail -3 || true
-        git pull --ff-only 2>&1 | tail -3 || true
+        (cd "$INSTALL_DIR/backend" && git fetch --tags 2>&1 | tail -3 || true && git pull --ff-only 2>&1 | tail -3 || true)
     fi
-fi
-
-if [[ ! -d "$INSTALL_DIR/backend/.git" ]]; then
+else
     info "Clonando camillagui-backend..."
     git clone --depth=1 "$BACKEND_REPO" "$INSTALL_DIR/backend"
 fi
