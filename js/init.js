@@ -25,8 +25,10 @@ function autoConnect() {
     const statusEl = document.getElementById('login-status');
     const appScreen = document.getElementById('screen-app');
     const debugPanel = document.getElementById('debug-panel');
+    const loginScreen = document.getElementById('screen-login');
     
-    appScreen.style.display = 'flex';
+    loginScreen.classList.add('hidden');
+    appScreen.classList.remove('hidden');
     if (debugPanel) debugPanel.style.display = 'block';
     
     document.getElementById('app-title').textContent = `Conectando a ${base}...`;

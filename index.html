@@ -17,29 +17,13 @@
 <!-- ═══════════════════════════════════════════════════════════════════════════
       PANTALLA LOGIN (OCULTA - CONEXIÓN AUTOMÁTICA)
 ═══════════════════════════════════════════════════════════════════════════ -->
-<div id="screen-login" style="display:none">
+<div id="screen-login" class="hidden">
     <div id="login-container">
         <div id="login-title">CAMILLADSP MASTER CONSOLE</div>
-        <div id="login-form">
-            <div class="login-row">
-                <label id="login-ip-label">IP Servidor:</label>
-                <input id="login-ip" type="text" placeholder="192.168.1.x" autocomplete="off" spellcheck="false">
-            </div>
-            <div class="login-row">
-                <label id="login-port-label">Puerto:</label>
-                <input id="login-port" type="text" value="5005" autocomplete="off">
-            </div>
-            <div id="login-btns">
-                <button id="btn-connect" class="accent">CONECTAR A HARDWARE</button>
-            </div>
-            <div id="login-status"></div>
-            <div style="display:flex;gap:6px;margin-top:4px">
-                <button id="btn-login-lang" style="flex:1">EN / ES</button>
-                <button id="btn-login-help" style="flex:1">AYUDA</button>
-                <button id="btn-login-reset" style="flex:1;color:var(--accent-warn);border-color:var(--accent-warn)">RESET</button>
-            </div>
+        <div id="login-status"></div>
+        <div style="margin-top:10px; font-size:12px;">
+            <button id="btn-login-lang">EN/ES</button>
         </div>
-        <div id="login-version">CamillaGUI Web — v1.0</div>
     </div>
 </div>
             <div class="login-row">
