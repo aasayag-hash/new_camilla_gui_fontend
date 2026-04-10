@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # ═══════════════════════════════════════════════════════════════════════════════
 # install.sh — Instalador CamillaDSP + camillagui-backend + frontend web
+# Versión 2.2 — Basado en AGRIT2025/CamillaDSP_v1
 # ═══════════════════════════════════════════════════════════════════════════════
 set -euo pipefail
 
@@ -16,19 +17,19 @@ warn()   { echo -e "${YELLOW}⚠${NC} $*"; }
 error()  { echo -e "${RED}✗${NC}  $*" >&2; }
 header() { echo -e "\n${BOLD}${CYAN}$*${NC}"; }
 
-# ── Config por defecto ────────────────────────────────────────────────────────
+# ── Configuración ────────────────────────────────────────────────────────────
+CAMILLA_VERSION="v4.1.3"
 INSTALL_DIR="/opt/camilladsp"
 BIN_DIR="/usr/local/bin"
 CONFIG_DIR="/etc/camilladsp"
 SYSTEMD_DIR="/etc/systemd/system"
 CAMILLADSP_BIN="${BIN_DIR}/camilladsp"
 BACKEND_REPO="https://github.com/HEnquist/camillagui-backend.git"
-FRONTEND_REPO="https://github.com/aasayag-hash/new_camilla_gui_fontend.git"
 
 # ── Banner ────────────────────────────────────────────────────────────────────
 echo -e "${BOLD}${CYAN}"
 echo "╔═══════════════════════════════════════════════════╗"
-echo "║      CamillaDSP + GUI Web — Instalador v2.1       ║"
+echo "║      CamillaDSP + GUI Web — Instalador v2.2       ║"
 echo "╚═══════════════════════════════════════════════════╝"
 echo -e "${NC}"
 
@@ -38,7 +39,6 @@ if [[ $EUID -ne 0 ]]; then
     exit 1
 fi
 
-# Determinar usuario real
 SERVICE_USER="${SUDO_USER:-}"
 if [[ -z "$SERVICE_USER" ]] || [[ "$SERVICE_USER" == "root" ]]; then
     error "Ejecuta como un usuario normal con sudo, no directamente como root."
@@ -86,17 +86,13 @@ fi
 log "Gestor de paquetes: $PKG_MGR"
 
 # ── Obtener versión de CamillaDSP ───────────────────────────────────────────
-CDSP_API="https://api.github.com/repos/HEnquist/camilladsp/releases/latest"
-CDSP_VERSION=""
-CDSP_URL=""
-
 info "Consultando última versión..."
-JSON=$(curl -sfL "$CDSP_API" 2>/dev/null || true)
+JSON=$(curl -sfL "https://api.github.com/repos/HEnquist/camilladsp/releases/latest" 2>/dev/null || true)
 if [[ -n "$JSON" ]]; then
     CDSP_VERSION=$(echo "$JSON" | grep '"tag_name"' | sed 's/.*"tag_name".*:.*"v\([^"]*\)".*/\1/' | head -1)
     if [[ -n "$CDSP_VERSION" ]]; then
-        CDSP_URL="https://github.com/HEnquist/camilladsp/releases/download/v${CDSP_VERSION}/camilladsp-linux-${ARCH_NAME}.tar.gz"
-        log "Versión: v${CDSP_VERSION}"
+        CAMILLA_VERSION="$CDSP_VERSION"
+        log "Versión: v${CAMILLA_VERSION}"
     fi
 fi
 
@@ -128,22 +124,22 @@ log "Python ${PYTHON_VERSION}"
 # ══════════════════════════════════════════════════════════════════════════════
 header "2/6 — CamillaDSP Engine"
 # ══════════════════════════════════════════════════════════════════════════════
-if [[ -n "$CDSP_URL" ]]; then
-    info "Descargando CamillaDSP v${CDSP_VERSION}..."
-    TMP_DIR=$(mktemp -d)
-    if curl -fsSL --progress-bar -o "${TMP_DIR}/camilladsp.tar.gz" "$CDSP_URL"; then
-        tar -xzf "${TMP_DIR}/camilladsp.tar.gz" -C "$TMP_DIR"
-        CDSP_BIN=$(find "$TMP_DIR" -name "camilladsp" -type f 2>/dev/null | head -1)
-        if [[ -n "$CDSP_BIN" ]]; then
-            install -m 755 "$CDSP_BIN" "$CAMILLADSP_BIN"
-            CDSP_VER=$("$CAMILLADSP_BIN" --version 2>&1 | head -1 || echo "desconocida")
-            log "CamillaDSP instalado: $CDSP_VER"
-        fi
-    else
-        warn "No se pudo descargar. Instala manualmente desde GitHub."
+CDSP_URL="https://github.com/HEnquist/camilladsp/releases/download/v${CAMILLA_VERSION}/camilladsp-linux-${ARCH_NAME}.tar.gz"
+
+info "Descargando CamillaDSP v${CAMILLA_VERSION}..."
+TMP_DIR=$(mktemp -d)
+if curl -fsSL --progress-bar -o "${TMP_DIR}/camilladsp.tar.gz" "$CDSP_URL"; then
+    tar -xzf "${TMP_DIR}/camilladsp.tar.gz" -C "$TMP_DIR"
+    CDSP_BIN=$(find "$TMP_DIR" -name "camilladsp" -type f 2>/dev/null | head -1)
+    if [[ -n "$CDSP_BIN" ]]; then
+        install -m 755 "$CDSP_BIN" "$CAMILLADSP_BIN"
+        CDSP_VER=$("$CAMILLADSP_BIN" --version 2>&1 | head -1 || echo "desconocida")
+        log "CamillaDSP instalado: $CDSP_VER"
     fi
-    rm -rf "$TMP_DIR"
+else
+    warn "No se pudo descargar. Instala manualmente desde GitHub."
 fi
+rm -rf "$TMP_DIR"
 
 # ══════════════════════════════════════════════════════════════════════════════
 header "3/6 — CamillaGUI Backend"
@@ -175,18 +171,18 @@ GUI_DEST="$INSTALL_DIR/backend/build"
 mkdir -p "$GUI_DEST"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+FRONTEND_DIST="${SCRIPT_DIR}/dist"
 
-if [[ -f "$SCRIPT_DIR/index.html" ]]; then
-    info "Copiando frontend local..."
-    cp -r "$SCRIPT_DIR"/index.html "$GUI_DEST/"
-    [[ -d "$SCRIPT_DIR/js" ]] && cp -r "$SCRIPT_DIR/js" "$GUI_DEST/"
-    [[ -d "$SCRIPT_DIR/style" ]] && cp -r "$SCRIPT_DIR/style" "$GUI_DEST/"
-    [[ -d "$SCRIPT_DIR/assets" ]] && cp -r "$SCRIPT_DIR/assets" "$GUI_DEST/"
+if [[ -d "$FRONTEND_DIST" ]] && [[ -f "${FRONTEND_DIST}/index.html" ]]; then
+    info "Copiando frontend compilado..."
+    cp -r "${FRONTEND_DIST}/"* "$GUI_DEST/"
 else
-    info "Clonando frontend..."
-    git clone --depth=1 "$FRONTEND_REPO" "$GUI_DEST" 2>/dev/null || {
-        warn "No se encontró frontend. Copia los archivos manualmente."
-    }
+    error "Frontend compilado no encontrado en: ${FRONTEND_DIST}"
+    echo "  Compila el frontend primero:"
+    echo "    cd camilla-frontend"
+    echo "    npm install"
+    echo "    npm run build"
+    exit 1
 fi
 log "Frontend instalado"
 
@@ -215,6 +211,7 @@ on_get_active_config: null
 supported_capture_types: null
 supported_playback_types: null
 EOF
+log "camillagui.yml creado"
 
 touch "$CONFIG_DIR/statefile.yml"
 
@@ -259,7 +256,6 @@ pipeline:
 EOF
     log "Configuración inicial creada"
 fi
-log "Configuración lista"
 
 # ══════════════════════════════════════════════════════════════════════════════
 header "6/6 — Servicios systemd"
