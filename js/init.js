@@ -18,27 +18,70 @@ import { reloadConfig, setFullConfig } from './core/state.js';
 const DEFAULT_IP = 'localhost';
 const DEFAULT_PORT = '5005';
 
+function showErrorPanel(err, details) {
+    const loginScreen = document.getElementById('screen-login');
+    const appScreen = document.getElementById('screen-app');
+    const statusEl = document.getElementById('login-status');
+    
+    loginScreen.style.display = 'flex';
+    appScreen.style.display = 'none';
+    
+    const errorMsg = `
+        <div style="text-align: left; max-width: 400px; margin: 0 auto;">
+            <strong style="color: #ff6b6b;">Error de conexión:</strong><br>
+            <pre style="background: #1a1a2e; padding: 10px; border-radius: 4px; 
+                        overflow-x: auto; font-size: 11px; color: #ccc;">
+${details}
+            </pre>
+            <br>
+            <strong>Posibles soluciones:</strong><br>
+            <ul style="text-align: left; font-size: 12px;">
+                <li>Verifica que el servicio esté corriendo: <code>sudo systemctl status camillagui</code></li>
+                <li>El backend debe estar en puerto ${DEFAULT_PORT}</li>
+                <li>Intenta conectar manualmente con IP del servidor</li>
+            </ul>
+        </div>
+    `;
+    statusEl.innerHTML = errorMsg;
+    statusEl.className = 'error';
+}
+
 function autoConnect() {
     const base = `http://${DEFAULT_IP}:${DEFAULT_PORT}`;
     window.CAMILLA_BASE = base;
     
-    document.getElementById('screen-login').style.display = 'none';
-    document.getElementById('screen-app').style.display = 'flex';
+    const statusEl = document.getElementById('login-status');
+    const loginScreen = document.getElementById('screen-login');
+    const appScreen = document.getElementById('screen-app');
     
-    document.getElementById('app-title').textContent = t('title');
+    loginScreen.style.display = 'flex';
+    appScreen.style.display = 'none';
+    statusEl.textContent = `Conectando a ${base}...`;
+    statusEl.className = '';
+    
+    console.log('[AutoConnect] Intentando conectar a:', base);
     
     API.getStatus()
-        .then(() => reloadConfig())
+        .then(data => {
+            console.log('[AutoConnect] Estado recibido:', data);
+            statusEl.textContent = `✓ Conectado a ${base}`;
+            statusEl.className = 'ok';
+            return reloadConfig();
+        })
         .then(() => {
-            document.getElementById('login-status').textContent = `Conectado a ${base}`;
-            document.getElementById('login-status').className = 'ok';
+            loginScreen.style.display = 'none';
+            appScreen.style.display = 'flex';
+            document.getElementById('app-title').textContent = t('title');
         })
         .catch(err => {
-            console.error('Auto-connect error:', err);
-            document.getElementById('login-status').textContent = `Error: No se pudo conectar a ${base}`;
-            document.getElementById('login-status').className = 'error';
-            document.getElementById('screen-login').style.display = 'flex';
-            document.getElementById('screen-app').style.display = 'none';
+            console.error('[AutoConnect] Error:', err);
+            let details = `URL: ${base}\n`;
+            if (err.message) details += `Error: ${err.message}\n`;
+            if (err.status) details += `HTTP Status: ${err.status}\n`;
+            if (err.statusText) details += `Status Text: ${err.statusText}\n`;
+            details += `\nTiempo: ${new Date().toLocaleString()}`;
+            
+            showErrorPanel(err, details);
         });
 }
 
