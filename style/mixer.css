@@ -1,0 +1,46 @@
+/* mixer.css — Matriz Mixer */
+
+#tab-mixer {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+}
+
+/* ── Scroll container ────────────────────────────────────────────────────── */
+#mixer-scroll {
+    flex: 1;
+    overflow: auto;
+    background: var(--bg-dark);
+    padding: 8px;
+}
+
+/* ── Canvas ──────────────────────────────────────────────────────────────── */
+#mixer-canvas {
+    cursor: pointer;
+}
+
+/* ── Tooltip ─────────────────────────────────────────────────────────────── */
+#mixer-tooltip {
+    position: fixed;
+    background: var(--bg-card);
+    border: 1px solid var(--border-light);
+    border-radius: var(--radius-sm);
+    padding: 3px 8px;
+    font-size: 10px;
+    color: var(--text-primary);
+    pointer-events: none;
+    display: none;
+    z-index: 20;
+    white-space: nowrap;
+}
+
+/* ── Info bar ────────────────────────────────────────────────────────────── */
+#mixer-info {
+    padding: 4px 8px;
+    background: var(--bg-panel);
+    border-top: 1px solid var(--border);
+    font-size: 10px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
