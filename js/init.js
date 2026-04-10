@@ -24,7 +24,7 @@ function showApp(ip, port) {
 }
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
-function bootstrap() {
+async function bootstrap() {
     // 1. Login
     initLogin((ip, port) => {
         showApp(ip, port);

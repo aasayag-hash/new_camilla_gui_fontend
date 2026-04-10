@@ -85,18 +85,80 @@ detect_pkg_manager() {
 }
 detect_pkg_manager
 
-# ── Versiones CamillaDSP disponibles ─────────────────────────────────────────
-# URLs de releases en GitHub — ajustar a la versión estable más reciente
-CDSP_VERSION="2.1.0"
-BASE_URL="https://github.com/HEnquist/camilladsp/releases/download/v${CDSP_VERSION}"
+# ── Auto-detectar última versión de CamillaDSP desde GitHub API ──────────────
+CDSP_API="https://api.github.com/repos/HEnquist/camilladsp/releases/latest"
+CDSP_VERSION=""
+CDSP_URL=""
 
-case "$ARCH_NAME" in
-    x86_64)  CDSP_URL="${BASE_URL}/camilladsp-linux-x86_64.tar.gz" ;;
-    aarch64) CDSP_URL="${BASE_URL}/camilladsp-linux-aarch64.tar.gz" ;;
-    armv7)   CDSP_URL="${BASE_URL}/camilladsp-linux-armv7.tar.gz" ;;
-    armv6)   CDSP_URL="${BASE_URL}/camilladsp-linux-armv6.tar.gz" ;;
-    *)       CDSP_URL="" ;;
-esac
+_fetch() {
+    # Intenta con curl primero, luego wget
+    if command -v curl &>/dev/null; then
+        curl -sfL "$1"
+    elif command -v wget &>/dev/null; then
+        wget -qO- "$1"
+    fi
+}
+
+_detect_cdsp_release() {
+    info "Consultando última versión en GitHub..."
+    local json
+    json=$(_fetch "$CDSP_API") || true
+
+    if [[ -z "$json" ]]; then
+        warn "No se pudo consultar la API de GitHub. Verificar conexión a internet."
+        return 1
+    fi
+
+    # Extraer tag_name (ej: "v2.0.3")
+    CDSP_VERSION=$(echo "$json" | grep '"tag_name"' \
+        | sed 's/.*"tag_name"[[:space:]]*:[[:space:]]*"v\([^"]*\)".*/\1/' \
+        | head -1)
+
+    if [[ -z "$CDSP_VERSION" ]]; then
+        warn "No se pudo determinar la versión. Respuesta de la API inesperada."
+        return 1
+    fi
+
+    info "Última versión disponible: v${CDSP_VERSION}"
+
+    # Buscar la URL del asset según arquitectura
+    # Los assets de CamillaDSP siguen el patrón: camilladsp-vX.Y.Z-ARCH-TARGET.tar.gz
+    local arch_pattern
+    case "$ARCH_NAME" in
+        x86_64)  arch_pattern="x86_64" ;;
+        aarch64) arch_pattern="aarch64" ;;
+        armv7)   arch_pattern="armv7" ;;
+        armv6)   arch_pattern="armv6" ;;
+        *)       arch_pattern="" ;;
+    esac
+
+    if [[ -z "$arch_pattern" ]]; then
+        warn "No hay binario precompilado para $ARCH_NAME."
+        return 1
+    fi
+
+    CDSP_URL=$(echo "$json" \
+        | grep '"browser_download_url"' \
+        | grep "$arch_pattern" \
+        | grep '\.tar\.gz' \
+        | sed 's/.*"browser_download_url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' \
+        | head -1)
+
+    if [[ -z "$CDSP_URL" ]]; then
+        warn "No se encontró asset para arquitectura '$arch_pattern' en v${CDSP_VERSION}."
+        # Listar assets disponibles para ayudar al diagnóstico
+        info "Assets disponibles en esta release:"
+        echo "$json" | grep '"browser_download_url"' \
+            | sed 's/.*"browser_download_url"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/  \1/' \
+            | head -20
+        return 1
+    fi
+
+    info "URL del binario: $CDSP_URL"
+    return 0
+}
+
+_detect_cdsp_release || true
 
 # ── Preguntar opciones ────────────────────────────────────────────────────────
 echo ""
@@ -151,12 +213,12 @@ if [[ "${INSTALL_CDSP^^}" != "N" ]]; then
             fi
         else
             warn "No se pudo descargar el binario precompilado."
-            warn "Descarga manual desde: $CDSP_REPO/releases"
+            warn "Descarga manual desde: $CAMILLADSP_REPO/releases"
         fi
         rm -rf "$TMP_DIR"
     else
         warn "No hay binario precompilado para $ARCH_NAME."
-        warn "Compilar manualmente: $CDSP_REPO"
+        warn "Compilar manualmente: $CAMILLADSP_REPO"
     fi
 
     # Verificar
