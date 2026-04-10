@@ -90,6 +90,11 @@ CDSP_API="https://api.github.com/repos/HEnquist/camilladsp/releases/latest"
 CDSP_VERSION=""
 CDSP_URL=""
 
+# ── Auto-detectar última versión de camillagui-backend desde GitHub API ───────
+BACKEND_API="https://api.github.com/repos/HEnquist/camillagui-backend/releases/latest"
+BACKEND_VERSION=""
+BACKEND_TAG=""
+
 _fetch() {
     # Intenta con curl primero, luego wget
     if command -v curl &>/dev/null; then
@@ -160,6 +165,34 @@ _detect_cdsp_release() {
 
 _detect_cdsp_release || true
 
+# ── Auto-detectar última versión de camillagui-backend ───────────────────────
+_detect_backend_release() {
+    info "Consultando última versión de camillagui-backend en GitHub..."
+    local json
+    json=$(_fetch "$BACKEND_API") || true
+
+    if [[ -z "$json" ]]; then
+        warn "No se pudo consultar la API de GitHub para el backend."
+        return 1
+    fi
+
+    BACKEND_TAG=$(echo "$json" \
+        | grep '"tag_name"' \
+        | sed 's/.*"tag_name"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/' \
+        | head -1)
+
+    if [[ -z "$BACKEND_TAG" ]]; then
+        warn "No se pudo determinar la versión del backend. Se usará la rama principal."
+        return 1
+    fi
+
+    BACKEND_VERSION="$BACKEND_TAG"
+    info "Última versión de camillagui-backend: $BACKEND_TAG"
+    return 0
+}
+
+_detect_backend_release || true
+
 # ── Preguntar opciones ────────────────────────────────────────────────────────
 echo ""
 read -rp "Directorio de instalación [${INSTALL_DIR}]: " INPUT_DIR
@@ -177,7 +210,8 @@ GUI_PORT="${GUI_PORT:-5005}"
 echo ""
 info "Configuración:"
 info "  Directorio:    $INSTALL_DIR"
-info "  CamillaDSP:    $(echo $INSTALL_CDSP | tr '[:lower:]' '[:upper:]')"
+info "  CamillaDSP:    $(echo $INSTALL_CDSP | tr '[:lower:]' '[:upper:]')${CDSP_VERSION:+ (v${CDSP_VERSION})}"
+info "  Backend GUI:   ${BACKEND_TAG:-rama principal (sin releases detectados)}"
 info "  Servicio:      $(echo $CREATE_SERVICE | tr '[:lower:]' '[:upper:]')"
 info "  Puerto GUI:    $GUI_PORT"
 echo ""
@@ -238,12 +272,24 @@ mkdir -p "$INSTALL_DIR"
 if [[ -d "$BACKEND_DIR/.git" ]]; then
     info "Backend ya existe, actualizando..."
     cd "$BACKEND_DIR"
-    git pull --ff-only 2>&1 | tail -3 || true
+    git fetch --tags 2>&1 | tail -3 || true
+    if [[ -n "$BACKEND_TAG" ]]; then
+        info "Cambiando a versión $BACKEND_TAG..."
+        git checkout "$BACKEND_TAG" 2>&1 | tail -3 \
+            || git pull --ff-only 2>&1 | tail -3 || true
+    else
+        git pull --ff-only 2>&1 | tail -3 || true
+    fi
 else
-    info "Clonando camillagui-backend..."
-    git clone --depth=1 "$BACKEND_REPO" "$BACKEND_DIR"
+    if [[ -n "$BACKEND_TAG" ]]; then
+        info "Clonando camillagui-backend $BACKEND_TAG..."
+        git clone --depth=1 --branch "$BACKEND_TAG" "$BACKEND_REPO" "$BACKEND_DIR"
+    else
+        info "Clonando camillagui-backend (rama principal)..."
+        git clone --depth=1 "$BACKEND_REPO" "$BACKEND_DIR"
+    fi
 fi
-success "Backend en $BACKEND_DIR"
+success "Backend en $BACKEND_DIR${BACKEND_TAG:+ — versión $BACKEND_TAG}"
 
 # Entorno virtual Python
 info "Creando entorno virtual Python..."
