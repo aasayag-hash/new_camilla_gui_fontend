@@ -481,7 +481,7 @@ After=sound.target
 [Service]
 Type=simple
 User=$SERVICE_USER
-ExecStart=$CAMILLADSP_BIN -a 0.0.0.0 -p 1234 -w $DEFAULT_CFG
+ExecStart=$CAMILLADSP_BIN -c $DEFAULT_CFG -p 1234 -a 0.0.0.0
 Restart=on-failure
 RestartSec=5
 
